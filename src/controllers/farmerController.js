@@ -80,7 +80,7 @@ const harvestAll = async (req, res) => {
 
             updatedFarmers.push({
                 id: farmer.id,
-                last_harvested: new Date().toISOString()
+                last_harvested: Date.now() // Store as Unix timestamp (milliseconds)
             });
         }
 
@@ -98,12 +98,15 @@ const harvestAll = async (req, res) => {
             });
         }
 
-        // Update all farmers' last_harvested timestamp
-        const { error: updateError } = await supabase
-            .from('farmers')
-            .upsert(updatedFarmers);
+        // Update each farmer's last_harvested timestamp individually
+        for (const farmer of updatedFarmers) {
+            const { error: updateError } = await supabase
+                .from('farmers')
+                .update({ last_harvested: farmer.last_harvested })
+                .eq('id', farmer.id);
 
-        if (updateError) throw updateError;
+            if (updateError) throw updateError;
+        }
 
         res.json({
             success: true,
@@ -119,7 +122,7 @@ const harvestAll = async (req, res) => {
     }
 };
 
-// Level up a farmer
+// Auto-merging level up function
 const levelUpFarmer = async (req, res) => {
     const { walletAddress, farmerId } = req.body;
 
@@ -128,8 +131,8 @@ const levelUpFarmer = async (req, res) => {
     }
 
     try {
-        // Get the farmer
-        const { data: farmer, error: farmerError } = await supabase
+        // Get the selected farmer
+        const { data: selectedFarmer, error: farmerError } = await supabase
             .from('farmers')
             .select('*')
             .eq('id', farmerId)
@@ -138,44 +141,77 @@ const levelUpFarmer = async (req, res) => {
 
         if (farmerError) throw farmerError;
 
-        if (!farmer) {
+        if (!selectedFarmer) {
             return res.status(404).json({ error: 'Farmer not found' });
         }
 
-        // Calculate level up cost - increases with each level
-        const levelUpCost = calculateLevelUpCost(farmer.level);
+        // Check if the level is below 5 (max level)
+        if (selectedFarmer.level >= 5) {
+            return res.status(400).json({ error: 'Farmer is already at maximum level (5)' });
+        }
 
-        // In a real implementation, you would check if the user has enough WLOS
-        // and transfer the tokens for the level up cost
-        // For now, we'll just simulate this
-
-        // Update the farmer's level
-        const newLevel = farmer.level + 1;
-        const { data: updatedFarmer, error: updateError } = await supabase
+        // Find other farmers of the same level
+        const { data: sameLevelFarmers, error: farmersError } = await supabase
             .from('farmers')
-            .update({ level: newLevel })
-            .eq('id', farmerId)
-            .select()
-            .single();
+            .select('*')
+            .eq('level', selectedFarmer.level)
+            .eq('owner_wallet', walletAddress)
+            .neq('id', selectedFarmer.id); // Exclude the selected farmer
 
-        if (updateError) throw updateError;
+        if (farmersError) throw farmersError;
 
-        // Calculate new yield with the increased level
-        const newYield = calculateEffectiveYield(updatedFarmer);
+        // Check if we have enough farmers to merge (need at least 2 more)
+        if (sameLevelFarmers.length >= 2) {
+            // We have enough farmers to merge - take the first 2
+            const farmersToMerge = sameLevelFarmers.slice(0, 2);
+            const farmersToDeleteIds = farmersToMerge.map(farmer => farmer.id);
 
-        res.json({
-            success: true,
-            message: `Successfully leveled up ${farmer.name} to level ${newLevel}`,
-            farmer: {
-                ...updatedFarmer,
-                effectiveYield: newYield
-            },
-            cost: levelUpCost,
-            yieldIncrease: newYield - calculateEffectiveYield(farmer)
-        });
+            const newLevel = selectedFarmer.level + 1;
+
+            // Update the selected farmer's level
+            const { data: updatedFarmer, error: updateError } = await supabase
+                .from('farmers')
+                .update({ level: newLevel })
+                .eq('id', selectedFarmer.id)
+                .select()
+                .single();
+
+            if (updateError) throw updateError;
+
+            // Delete the other two farmers
+            const { error: deleteError } = await supabase
+                .from('farmers')
+                .delete()
+                .in('id', farmersToDeleteIds);
+
+            if (deleteError) throw deleteError;
+
+            // Calculate new yield with the increased level
+            const newYield = calculateEffectiveYield(updatedFarmer);
+            const oldYield = calculateEffectiveYield(selectedFarmer);
+
+            return res.json({
+                success: true,
+                message: `Successfully merged 3 level ${selectedFarmer.level} farmers to create a level ${newLevel} farmer`,
+                method: 'merge',
+                farmer: {
+                    ...updatedFarmer,
+                    effectiveYield: newYield
+                },
+                yieldIncrease: newYield - oldYield,
+                mergedFarmerIds: farmersToDeleteIds
+            });
+        }
+        else {
+            // Not enough farmers to merge
+            const farmersNeeded = 2 - sameLevelFarmers.length;
+            return res.status(400).json({
+                error: `Not enough farmers to merge. You need ${farmersNeeded} more level ${selectedFarmer.level} farmer(s)`
+            });
+        }
 
     } catch (error) {
-        console.error('Error leveling up farmer:', error);
+        console.error('Error with farmer level up:', error);
         res.status(500).json({ error: 'Failed to level up farmer' });
     }
 };

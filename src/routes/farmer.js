@@ -12,7 +12,7 @@ router.get('/:walletAddress', getFarmers);
 // Harvest all rewards
 router.post('/harvest', harvestAll);
 
-// Level up a farmer
+// Level up a farmer (with auto-merging)
 router.post('/levelup', levelUpFarmer);
 
 module.exports = router;
