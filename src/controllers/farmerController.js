@@ -1,7 +1,7 @@
 const supabase = require('../../supabase/supabaseClient');
 const { mintRewardsOnChain } = require('../utils/tokenTransfers');
 require('dotenv').config();
-
+const transactionController = require('./transactionController');
 // Get all farmers for a wallet
 const getFarmers = async (req, res) => {
     const { walletAddress } = req.params;
@@ -97,6 +97,17 @@ const harvestAll = async (req, res) => {
                 details: mintResult.error
             });
         }
+
+        // Record the farming reward transaction
+        await transactionController.recordReward(
+            walletAddress,
+            'Farming',
+            totalRewards,
+            {
+                farmersCount: farmers.length,
+                farmerIds: farmers.map(farmer => farmer.id)
+            }
+        );
 
         // Update each farmer's last_harvested timestamp individually
         for (const farmer of updatedFarmers) {

@@ -10,6 +10,8 @@ require('dotenv').config();
 // Connect to Solana devnet
 const connection = new Connection('https://api.devnet.solana.com');
 
+const transactionController = require('./transactionController');
+
 // WLOS token mint
 const WLOS_MINT = process.env.WLOS_TOKEN_MINT;
 
@@ -146,6 +148,21 @@ const stakeTokens = async (req, res) => {
             .single();
 
         if (stakingError) throw stakingError;
+
+        // Record the transaction
+        await transactionController.recordStaking(
+            walletAddress,
+            poolData.name,
+            amount,
+            {
+                poolId: poolId,
+                stakingId: stakingData.id,
+                startTime: startTime,
+                endTime: endTime,
+                lockPeriod: poolData.lock_period_days,
+                apy: poolData.apy
+            }
+        );
 
         // Calculate the expected rewards at the end of the lock period
         const lockPeriodYears = poolData.lock_period_days / 365;
@@ -330,6 +347,21 @@ const unstakeTokens = async (req, res) => {
             });
         }
 
+        // Record the unstaking transaction
+        await transactionController.recordUnstaking(
+            walletAddress,
+            pool.name,
+            unstakeAmount,
+            feeAmount,
+            {
+                poolId: pool.id,
+                stakingId: stakingId,
+                isEarlyUnstake: isEarlyUnstake,
+                originalAmount: parseFloat(stakingData.amount),
+                feePercentage: isEarlyUnstake ? pool.early_unstake_fee : 0
+            }
+        );
+
         // Then, mint the rewards to the user
         let rewardsMintResult = null;
         if (pendingRewards > 0) {
@@ -338,6 +370,18 @@ const unstakeTokens = async (req, res) => {
             if (!rewardsMintResult.success) {
                 console.error('Failed to mint rewards:', rewardsMintResult.error);
                 // We'll continue anyway since the unstake was successful
+            } else {
+                // Record the rewards transaction
+                await transactionController.recordReward(
+                    walletAddress,
+                    'Staking',
+                    pendingRewards,
+                    {
+                        poolId: pool.id,
+                        stakingId: stakingId,
+                        poolName: pool.name
+                    }
+                );
             }
         }
 
@@ -375,6 +419,7 @@ const unstakeTokens = async (req, res) => {
         res.status(500).json({ error: 'Failed to unstake tokens' });
     }
 };
+
 
 // Claim rewards
 const claimRewards = async (req, res) => {
@@ -431,6 +476,18 @@ const claimRewards = async (req, res) => {
                 details: rewardsMintResult.error
             });
         }
+
+        // Record the rewards transaction
+        await transactionController.recordReward(
+            walletAddress,
+            'Staking',
+            pendingRewards,
+            {
+                poolId: pool.id,
+                stakingId: stakingId,
+                poolName: pool.name
+            }
+        );
 
         // Update staking record
         const { error: updateError } = await supabase

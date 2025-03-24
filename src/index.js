@@ -1,3 +1,4 @@
+// src/index.js
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -12,14 +13,16 @@ const walletRoutes = require('./routes/wallet');
 const assetRoutes = require('./routes/asset');
 const packRoutes = require('./routes/pack');
 const stakingRoutes = require('./routes/staking');
-const farmerRoutes = require('./routes/farmer'); // Add this line
+const farmerRoutes = require('./routes/farmer');
+const transactionRoutes = require('./routes/transaction'); // Add transaction routes
 
 app.use('/auth', authRoutes);
 app.use('/wallet', walletRoutes);
 app.use('/assets', assetRoutes);
 app.use('/packs', packRoutes);
 app.use('/staking', stakingRoutes);
-app.use('/farmers', farmerRoutes); // Add this line
+app.use('/farmers', farmerRoutes);
+app.use('/transactions', transactionRoutes); // Register transaction routes
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

@@ -8,6 +8,8 @@ const connection = new Connection('https://api.devnet.solana.com');
 // WLOS token mint
 const WLOS_MINT = process.env.WLOS_TOKEN_MINT;
 
+const transactionController = require('./transactionController');
+
 // Get available pack types
 const getPackTypes = async (req, res) => {
     const { assetType } = req.query; // 'hero' or 'farmer'
@@ -119,6 +121,20 @@ const buyPack = async (req, res) => {
             .single();
 
         if (packError) throw packError;
+
+        // Record the transaction
+        if (packPrice > 0) {
+            await transactionController.recordPackPurchase(
+                walletAddress,
+                packTypeData.name,
+                packPrice,
+                {
+                    packId: packId,
+                    assetType: packTypeData.asset_type,
+                    purchaseId: packData.id
+                }
+            );
+        }
 
         // Format the response to match frontend expectations
         const purchasedPack = {
