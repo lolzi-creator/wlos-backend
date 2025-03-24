@@ -2,6 +2,7 @@ const supabase = require('../../supabase/supabaseClient');
 const { mintRewardsOnChain } = require('../utils/tokenTransfers');
 require('dotenv').config();
 const transactionController = require('./transactionController');
+
 // Get all farmers for a wallet
 const getFarmers = async (req, res) => {
     const { walletAddress } = req.params;
@@ -133,7 +134,7 @@ const harvestAll = async (req, res) => {
     }
 };
 
-// Auto-merging level up function
+// FIXED: Auto-merging level up function that requires 3 of the same type
 const levelUpFarmer = async (req, res) => {
     const { walletAddress, farmerId } = req.body;
 
@@ -161,20 +162,21 @@ const levelUpFarmer = async (req, res) => {
             return res.status(400).json({ error: 'Farmer is already at maximum level (5)' });
         }
 
-        // Find other farmers of the same level
-        const { data: sameLevelFarmers, error: farmersError } = await supabase
+        // FIXED: Find other farmers of the same TYPE and LEVEL
+        const { data: sameFarmers, error: farmersError } = await supabase
             .from('farmers')
             .select('*')
             .eq('level', selectedFarmer.level)
+            .eq('farmer_id', selectedFarmer.farmer_id) // This ensures we need the same type
             .eq('owner_wallet', walletAddress)
             .neq('id', selectedFarmer.id); // Exclude the selected farmer
 
         if (farmersError) throw farmersError;
 
-        // Check if we have enough farmers to merge (need at least 2 more)
-        if (sameLevelFarmers.length >= 2) {
+        // Check if we have enough farmers to merge (need at least 2 more of the same type)
+        if (sameFarmers.length >= 2) {
             // We have enough farmers to merge - take the first 2
-            const farmersToMerge = sameLevelFarmers.slice(0, 2);
+            const farmersToMerge = sameFarmers.slice(0, 2);
             const farmersToDeleteIds = farmersToMerge.map(farmer => farmer.id);
 
             const newLevel = selectedFarmer.level + 1;
@@ -203,7 +205,7 @@ const levelUpFarmer = async (req, res) => {
 
             return res.json({
                 success: true,
-                message: `Successfully merged 3 level ${selectedFarmer.level} farmers to create a level ${newLevel} farmer`,
+                message: `Successfully merged 3 level ${selectedFarmer.level} ${selectedFarmer.name} farmers to create a level ${newLevel} ${selectedFarmer.name} farmer`,
                 method: 'merge',
                 farmer: {
                     ...updatedFarmer,
@@ -215,9 +217,9 @@ const levelUpFarmer = async (req, res) => {
         }
         else {
             // Not enough farmers to merge
-            const farmersNeeded = 2 - sameLevelFarmers.length;
+            const farmersNeeded = 2 - sameFarmers.length;
             return res.status(400).json({
-                error: `Not enough farmers to merge. You need ${farmersNeeded} more level ${selectedFarmer.level} farmer(s)`
+                error: `Not enough ${selectedFarmer.name} farmers to merge. You need ${farmersNeeded} more level ${selectedFarmer.level} ${selectedFarmer.name} farmer(s)`
             });
         }
 

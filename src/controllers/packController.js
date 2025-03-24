@@ -222,7 +222,7 @@ const getPackInventory = async (req, res) => {
     }
 };
 
-// Open a pack
+// Open a pack - FIXED VERSION
 const openPack = async (req, res) => {
     const { packId, walletAddress } = req.body;
 
@@ -251,7 +251,7 @@ const openPack = async (req, res) => {
         // Get the pack type
         const packType = pack.pack_types;
 
-        // Generate random contents based on probabilities
+        // Generate contents - FIXED to only get 1 item per pack
         const contents = await generatePackContents(packType, walletAddress);
 
         // Mark the pack as opened
@@ -279,42 +279,36 @@ const openPack = async (req, res) => {
     }
 };
 
-// Generate random pack contents based on probabilities
+// Generate random pack contents based on probabilities - FIXED VERSION
 async function generatePackContents(packType, walletAddress) {
-    // Determine how many items to give (1-3 items per pack)
-    const itemCount = Math.floor(Math.random() * 3) + 1;
-
-    // Contents will hold our final items
+    // Contents will hold our final item
     const contents = {
         heroes: [],
         farmers: [],
         items: []
     };
 
-    // For each item, determine its rarity
-    for (let i = 0; i < itemCount; i++) {
-        // Determine rarity based on pack chances
-        const rarityRoll = Math.random();
-        let rarity;
+    // Determine rarity based on probabilities
+    const rarityRoll = Math.random();
+    let rarity;
 
-        if (rarityRoll < packType.legendary_chance) {
-            rarity = 'legendary';
-        } else if (rarityRoll < packType.legendary_chance + packType.epic_chance) {
-            rarity = 'epic';
-        } else if (rarityRoll < packType.legendary_chance + packType.epic_chance + packType.rare_chance) {
-            rarity = 'rare';
-        } else {
-            rarity = 'common';
-        }
+    if (rarityRoll < packType.legendary_chance) {
+        rarity = 'legendary';
+    } else if (rarityRoll < packType.legendary_chance + packType.epic_chance) {
+        rarity = 'epic';
+    } else if (rarityRoll < packType.legendary_chance + packType.epic_chance + packType.rare_chance) {
+        rarity = 'rare';
+    } else {
+        rarity = 'common';
+    }
 
-        // Generate appropriate asset based on pack type and rarity
-        if (packType.asset_type === 'hero') {
-            const hero = await generateHero(rarity, walletAddress);
-            contents.heroes.push(hero);
-        } else if (packType.asset_type === 'farmer') {
-            const farmer = await generateFarmer(rarity, walletAddress);
-            contents.farmers.push(farmer);
-        }
+    // Generate ONE asset based on pack type and rarity
+    if (packType.asset_type === 'hero') {
+        const hero = await generateHero(rarity, walletAddress);
+        contents.heroes.push(hero);
+    } else if (packType.asset_type === 'farmer') {
+        const farmer = await generateFarmer(rarity, walletAddress);
+        contents.farmers.push(farmer);
     }
 
     return contents;
