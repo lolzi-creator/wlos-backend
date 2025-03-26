@@ -3,6 +3,7 @@ const router = express.Router();
 const {
     getStakingPools,
     stakeTokens,
+    confirmStakeTokens,
     getStakingInfo,
     unstakeTokens,
     claimRewards
@@ -11,8 +12,11 @@ const {
 // Get available staking pools
 router.get('/pools', getStakingPools);
 
-// Stake tokens
+// Stake tokens - step 1: create transaction
 router.post('/stake', stakeTokens);
+
+// Stake tokens - step 2: process signed transaction
+router.post('/confirm-stake', confirmStakeTokens);
 
 // Get staking info
 router.get('/info/:walletAddress', getStakingInfo);

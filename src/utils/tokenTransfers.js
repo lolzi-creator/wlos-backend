@@ -52,34 +52,73 @@ try {
 }
 
 /**
- * Transfer tokens from user to treasury for staking
+ * Create a transaction for the user to stake tokens
  * @param {string} userWalletPublicKey - User's wallet public key
  * @param {number} amount - Amount to stake (in WLOS)
- * @returns {Promise<{success: boolean, signature: string, error: string|null}>}
+ * @returns {Promise<{success: boolean, transaction: string, error: string|null}>}
  */
 async function stakeTokensOnChain(userWalletPublicKey, amount) {
-    // In a real implementation, the user would sign this transaction in their wallet
-    // Here we're simulating the process assuming the transaction is already signed by the user
-
     try {
-        console.log(`Simulating staking ${amount} WLOS from ${userWalletPublicKey} to treasury`);
+        console.log(`Creating staking transaction for ${amount} WLOS from ${userWalletPublicKey} to treasury`);
 
         // Convert string to PublicKey
         const userPublicKey = new PublicKey(userWalletPublicKey);
 
-        // This is where you would create a transaction for the user to sign, then submit
-        // For simulation, we'll just log the details and consider it successful
+        // Get or create associated token accounts for user and treasury
+        const userTokenAccount = await getOrCreateAssociatedTokenAccount(
+            connection,
+            treasuryWallet, // Payer for account creation if needed
+            WLOS_MINT,
+            userPublicKey
+        );
+
+        const treasuryTokenAccount = await getOrCreateAssociatedTokenAccount(
+            connection,
+            treasuryWallet,
+            WLOS_MINT,
+            treasuryWallet.publicKey
+        );
+
+        // Convert amount to the right decimal precision (assuming 9 decimals)
+        const transferAmount = Math.floor(amount * 1e9);
+
+        // Create transfer instruction
+        // Note: This requires the USER's signature, not the treasury
+        const transferInstruction = createTransferInstruction(
+            userTokenAccount.address,
+            treasuryTokenAccount.address,
+            userPublicKey, // The user must sign this
+            transferAmount,
+            [],
+            TOKEN_PROGRAM_ID
+        );
+
+        // Create transaction
+        const transaction = new Transaction().add(transferInstruction);
+        
+        // Set the recent blockhash and fee payer
+        transaction.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+        transaction.feePayer = userPublicKey;
+        
+        // Serialize the transaction to a Buffer
+        const serializedTransaction = transaction.serialize({
+            requireAllSignatures: false, // We don't have all signatures yet
+            verifySignatures: false
+        });
+        
+        // Convert to base64 for easy transport to frontend
+        const base64Transaction = serializedTransaction.toString('base64');
 
         console.log({
             from: userPublicKey.toString(),
             to: treasuryWallet.publicKey.toString(),
             amount: amount,
-            mint: WLOS_MINT.toString()
+            transaction: base64Transaction.slice(0, 20) + '...' // Truncated for logging
         });
 
         return {
             success: true,
-            signature: 'simulated_transaction_' + Date.now(),
+            transaction: base64Transaction,
             error: null
         };
 
@@ -87,7 +126,7 @@ async function stakeTokensOnChain(userWalletPublicKey, amount) {
         console.error('Error in stakeTokensOnChain:', error);
         return {
             success: false,
-            signature: null,
+            transaction: null,
             error: error.message
         };
     }
@@ -121,22 +160,28 @@ async function unstakeTokensOnChain(userWalletPublicKey, amount) {
             userPublicKey
         );
 
+        // Convert amount to the right decimal precision (assuming 9 decimals)
+        const transferAmount = Math.floor(amount * 1e9);
+
         // Create transfer instruction
         const transferInstruction = createTransferInstruction(
             treasuryTokenAccount.address,
             userTokenAccount.address,
             treasuryWallet.publicKey,
-            amount * 1e9, // Assuming 9 decimals for WLOS token
+            transferAmount,
             [],
             TOKEN_PROGRAM_ID
         );
 
         // Create and sign transaction
         const transaction = new Transaction().add(transferInstruction);
-
-        // In reality, we would sign and send the transaction
-        // For now, just simulate success
-        const signature = 'simulated_unstake_' + Date.now();
+        
+        // Send and confirm the transaction
+        const signature = await sendAndConfirmTransaction(
+            connection,
+            transaction,
+            [treasuryWallet]
+        );
 
         console.log({
             from: treasuryWallet.publicKey.toString(),
@@ -169,24 +214,59 @@ async function unstakeTokensOnChain(userWalletPublicKey, amount) {
  */
 async function mintRewardsOnChain(userWalletPublicKey, amount) {
     try {
-        console.log(`Minting ${amount} WLOS rewards to ${userWalletPublicKey}`);
+        console.log(`Transferring ${amount} WLOS rewards to ${userWalletPublicKey} from treasury`);
 
         // Convert string to PublicKey
         const userPublicKey = new PublicKey(userWalletPublicKey);
+        
+        // Get or create associated token accounts for treasury and user
+        const treasuryTokenAccount = await getOrCreateAssociatedTokenAccount(
+            connection,
+            treasuryWallet,
+            WLOS_MINT,
+            treasuryWallet.publicKey
+        );
 
-        // In a real implementation, this would mint new tokens to the user
-        // For this simulation, we'll just log the details
+        const userTokenAccount = await getOrCreateAssociatedTokenAccount(
+            connection,
+            treasuryWallet, // Payer for creating the account if needed
+            WLOS_MINT,
+            userPublicKey
+        );
+        
+        // Convert amount to the right decimal precision (assuming 9 decimals)
+        const transferAmount = Math.floor(amount * 1e9);
+        
+        // Create transfer instruction
+        const transferInstruction = createTransferInstruction(
+            treasuryTokenAccount.address,
+            userTokenAccount.address,
+            treasuryWallet.publicKey,
+            transferAmount,
+            [],
+            TOKEN_PROGRAM_ID
+        );
+
+        // Create and sign transaction
+        const transaction = new Transaction().add(transferInstruction);
+        
+        // Actually send the transaction
+        const signature = await sendAndConfirmTransaction(
+            connection,
+            transaction,
+            [treasuryWallet]
+        );
 
         console.log({
+            from: treasuryWallet.publicKey.toString(),
             to: userPublicKey.toString(),
             amount: amount,
-            mint: WLOS_MINT.toString()
+            signature: signature
         });
 
-        // Simulate a successful mint
         return {
             success: true,
-            signature: 'simulated_mint_' + Date.now(),
+            signature: signature,
             error: null
         };
 
@@ -200,9 +280,47 @@ async function mintRewardsOnChain(userWalletPublicKey, amount) {
     }
 }
 
+/**
+ * Process a signed staking transaction from the user
+ * @param {string} signedTransaction - Base64 encoded signed transaction
+ * @returns {Promise<{success: boolean, signature: string, error: string|null}>}
+ */
+async function processSignedStakingTransaction(signedTransaction) {
+    try {
+        console.log('Processing signed staking transaction');
+
+        // Convert base64 string back to Buffer and deserialize
+        const transactionBuffer = Buffer.from(signedTransaction, 'base64');
+        const transaction = Transaction.from(transactionBuffer);
+        
+        // Send the signed transaction to the Solana network
+        const signature = await sendAndConfirmTransaction(
+            connection,
+            transaction,
+            [] // No additional signers needed, user already signed
+        );
+        
+        console.log('Staking transaction confirmed with signature:', signature);
+        
+        return {
+            success: true,
+            signature: signature,
+            error: null
+        };
+    } catch (error) {
+        console.error('Error processing signed staking transaction:', error);
+        return {
+            success: false,
+            signature: null,
+            error: error.message
+        };
+    }
+}
+
 module.exports = {
     treasuryWallet,
     stakeTokensOnChain,
     unstakeTokensOnChain,
-    mintRewardsOnChain
+    mintRewardsOnChain,
+    processSignedStakingTransaction
 };

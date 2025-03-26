@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
+    "start": "node src/index.js",
+    "build": "npm install",
+    "dev": "nodemon src/index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -19,5 +22,11 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "tweetnacl": "^1.0.3"
+  },
+  "devDependencies": {
+    "eslint-plugin-unused-imports": "^4.1.4",
+    "nodemon": "^3.1.9",
+    "ts-prune": "^0.10.3",
+    "unimported": "^1.31.0"
   }
 }

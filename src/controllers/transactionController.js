@@ -432,3 +432,56 @@ exports.recordPackPurchase = async (fromWallet, packName, cost, details = {}) =>
         return { success: false, error };
     }
 };
+
+// Create a transaction record (internal helper function for other controllers)
+exports.createTransactionRecord = async (transactionData) => {
+    try {
+        const {
+            walletAddress,
+            type,
+            item,
+            amount,
+            token,
+            fromWallet = null,
+            toWallet = null,
+            status = 'Completed',
+            category = 'Marketplace',
+            hash = null,
+            fee = 0,
+            description = '',
+            metadata = {}
+        } = transactionData;
+
+        // Determine from/to wallet based on walletAddress if not explicitly provided
+        const actualFromWallet = fromWallet || walletAddress;
+        const actualToWallet = toWallet;
+
+        const { data, error } = await supabase
+            .from('transactions')
+            .insert([
+                {
+                    type,
+                    item,
+                    amount,
+                    token,
+                    from_wallet: actualFromWallet,
+                    to_wallet: actualToWallet,
+                    status,
+                    category,
+                    hash,
+                    fee,
+                    timestamp: new Date(),
+                    notes: description,
+                    details: metadata
+                }
+            ])
+            .select()
+            .single();
+
+        if (error) throw error;
+        return { success: true, data };
+    } catch (error) {
+        console.error('Error creating transaction record:', error);
+        return { success: false, error };
+    }
+};

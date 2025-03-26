@@ -39,7 +39,7 @@ try {
     console.log('Valid token mint address:', tokenMint.toString());
 
     // Amount of WLOS to mint
-    const amount = 100; // Minting 100 WLOS tokens
+    const amount = 50000; // Minting 100 WLOS tokens
 
     async function mintTokens() {
         try {

@@ -3,7 +3,8 @@ const { Connection, PublicKey } = require('@solana/web3.js');
 const {
     stakeTokensOnChain,
     unstakeTokensOnChain,
-    mintRewardsOnChain
+    mintRewardsOnChain,
+    processSignedStakingTransaction
 } = require('../utils/tokenTransfers');
 require('dotenv').config();
 
@@ -60,7 +61,7 @@ const getStakingPools = async (req, res) => {
     }
 };
 
-// Stake tokens
+// Stake tokens - first step: create transaction
 const stakeTokens = async (req, res) => {
     const { walletAddress, amount, poolId } = req.body;
 
@@ -115,17 +116,90 @@ const stakeTokens = async (req, res) => {
             });
         }
 
-        // Transfer tokens from user to treasury (staking)
+        // Create a transaction for tokens transfer from user to treasury (staking)
         const transferResult = await stakeTokensOnChain(walletAddress, amount);
 
         if (!transferResult.success) {
             return res.status(500).json({
-                error: 'Failed to process token transfer for staking',
+                error: 'Failed to create transaction for staking',
                 details: transferResult.error
             });
         }
 
         // Calculate end time based on lock period
+        const startTime = new Date();
+        const endTime = new Date(startTime);
+        endTime.setDate(endTime.getDate() + poolData.lock_period_days);
+
+        // Generate a pending record ID
+        const pendingId = Date.now().toString();
+
+        // Store staking intent in a temporary table or cache
+        // For simplicity, we'll just return the data for now
+        // In a real implementation, you'd store this data until the signed transaction is returned
+
+        // Calculate the expected rewards at the end of the lock period
+        const lockPeriodYears = poolData.lock_period_days / 365;
+        const expectedRewards = amount * (poolData.apy / 100) * lockPeriodYears;
+
+        res.json({
+            success: true,
+            message: `Transaction created for staking ${amount} WLOS tokens in ${poolData.name}`,
+            transactionToSign: transferResult.transaction,
+            pendingId: pendingId,
+            poolDetails: {
+                id: poolId,
+                name: poolData.name,
+                amount: parseFloat(amount),
+                lockPeriod: poolData.lock_period_days,
+                apy: poolData.apy,
+                startTime: startTime,
+                endTime: endTime,
+                battlePowerBoost: poolData.battle_power_boost,
+                expectedRewards: parseFloat(expectedRewards.toFixed(4))
+            }
+        });
+
+    } catch (error) {
+        console.error('Error creating staking transaction:', error);
+        res.status(500).json({ error: 'Failed to create staking transaction' });
+    }
+};
+
+// Stake tokens - second step: confirm with signed transaction
+const confirmStakeTokens = async (req, res) => {
+    const { walletAddress, signedTransaction, pendingId, amount, poolId } = req.body;
+
+    if (!walletAddress || !signedTransaction || !pendingId || !amount || !poolId) {
+        return res.status(400).json({ 
+            error: 'Wallet address, signed transaction, pending ID, amount, and pool ID are required'
+        });
+    }
+
+    try {
+        // Get the pool details
+        const { data: poolData, error: poolError } = await supabase
+            .from('staking_pools')
+            .select('*')
+            .eq('id', poolId)
+            .single();
+
+        if (poolError) throw poolError;
+        if (!poolData) {
+            return res.status(404).json({ error: 'Staking pool not found' });
+        }
+
+        // Process the signed transaction
+        const processResult = await processSignedStakingTransaction(signedTransaction);
+
+        if (!processResult.success) {
+            return res.status(500).json({
+                error: 'Failed to process the signed transaction',
+                details: processResult.error
+            });
+        }
+
+        // Calculate start/end times
         const startTime = new Date();
         const endTime = new Date(startTime);
         endTime.setDate(endTime.getDate() + poolData.lock_period_days);
@@ -141,7 +215,8 @@ const stakeTokens = async (req, res) => {
                     start_time: startTime,
                     end_time: endTime,
                     last_claim_time: startTime,
-                    is_active: true
+                    is_active: true,
+                    transaction_signature: processResult.signature
                 }
             ])
             .select()
@@ -160,7 +235,8 @@ const stakeTokens = async (req, res) => {
                 startTime: startTime,
                 endTime: endTime,
                 lockPeriod: poolData.lock_period_days,
-                apy: poolData.apy
+                apy: poolData.apy,
+                transactionSignature: processResult.signature
             }
         );
 
@@ -171,7 +247,7 @@ const stakeTokens = async (req, res) => {
         res.json({
             success: true,
             message: `Successfully staked ${amount} WLOS tokens in ${poolData.name}`,
-            transaction: transferResult.signature,
+            transaction: processResult.signature,
             staking: {
                 id: stakingData.id,
                 poolId: stakingData.pool_id,
@@ -187,8 +263,8 @@ const stakeTokens = async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Error staking tokens:', error);
-        res.status(500).json({ error: 'Failed to stake tokens' });
+        console.error('Error confirming stake transaction:', error);
+        res.status(500).json({ error: 'Failed to confirm staking' });
     }
 };
 
@@ -519,6 +595,7 @@ const claimRewards = async (req, res) => {
 module.exports = {
     getStakingPools,
     stakeTokens,
+    confirmStakeTokens,
     getStakingInfo,
     unstakeTokens,
     claimRewards
